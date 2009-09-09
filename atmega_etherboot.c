@@ -72,6 +72,21 @@
 #include <avr/wdt.h>
 #include <util/delay.h>
 #include <avr/boot.h>
+#include "W5100.h"
+
+#define Sn_RX_MASK (0x0800-1)
+
+#define S0_RX_BASE (RX_BASE+(Sn_RX_MASK+1)*0)
+#define S1_RX_BASE (RX_BASE+(Sn_RX_MASK+1)*1)
+#define S2_RX_BASE (RX_BASE+(Sn_RX_MASK+1)*2)
+#define S3_RX_BASE (RX_BASE+(Sn_RX_MASK+1)*3)
+
+#define Sn_TX_MASK (0x0800-1)
+
+#define S0_TX_BASE (TX_BASE+(Sn_TX_MASK+1)*0)
+#define S1_TX_BASE (TX_BASE+(Sn_TX_MASK+1)*1)
+#define S2_TX_BASE (TX_BASE+(Sn_TX_MASK+1)*2)
+#define S3_TX_BASE (TX_BASE+(Sn_TX_MASK+1)*3)
 
 /* the current avr-libc eeprom functions do not support the ATmega168 */
 /* own eeprom write/read functions are used instead */
@@ -90,12 +105,6 @@
 /* 20070707: hacked by David A. Mellis - after this many errors give up and launch application */
 #define MAX_ERROR_COUNT 5
 
-/* set the UART baud rate */
-/* 20060803: hacked by DojoCorp */
-//#define BAUD_RATE   115200
-#ifndef BAUD_RATE
-#define BAUD_RATE   19200
-#endif
 
 
 /* SW_MAJOR and MINOR needs to be updated from time to time to avoid warning message from AVR Studio */
@@ -103,24 +112,6 @@
 #define HW_VER	 0x02
 #define SW_MAJOR 0x01
 #define SW_MINOR 0x10
-
-
-/* Adjust to suit whatever pin your hardware uses to enter the bootloader */
-/* ATmega128 has two UARTS so two pins are used to enter bootloader and select UART */
-/* BL0... means UART0, BL1... means UART1 */
-#ifdef __AVR_ATmega128__
-#define BL_DDR  DDRF
-#define BL_PORT PORTF
-#define BL_PIN  PINF
-#define BL0     PINF7
-#define BL1     PINF6
-#else
-/* other ATmegas have only one UART, so only one pin is defined to enter bootloader */
-#define BL_DDR  DDRD
-#define BL_PORT PORTD
-#define BL_PIN  PIND
-#define BL      PIND6
-#endif
 
 
 /* onboard LED is used to indicate, that the bootloader was entered (3x flashing) */
@@ -240,6 +231,9 @@ void puthex(char);
 void flash_led(uint8_t);
 static inline void boot_program_page(uint32_t, uint8_t*);
 int main (void) __attribute__ ((naked,section (".init9")));
+uint8_t spi(uint8_t data); //Basic 8-Bit SPI exchange
+uint8_t spi_W5100(uint8_t opcode, uint16_t address, uint8_t data); //Send a full 32-Bit Command to the W5100 chip
+void sock_close();
 
 /* some variables */
 union address_union {
@@ -263,7 +257,6 @@ uint8_t address_high;
 uint8_t pagesz=0x80;
 
 uint8_t i;
-uint8_t bootuart = 0;
 
 uint8_t error_count = 0;
 uint8_t firstchar = 0;
@@ -333,99 +326,109 @@ int main(void)
 #endif
 
 
-#ifdef __AVR_ATmega128__
-	/* check which UART should be used for booting */
-	if(bit_is_clear(BL_PIN, BL0)) {
-		bootuart = 1;
-	}
-	else if(bit_is_clear(BL_PIN, BL1)) {
-		bootuart = 2;
-	}
-#endif
-
-	/* check if flash is programmed already, if not start bootloader anyway */
-	if(pgm_read_byte_near(0x0000) != 0xFF) {
-
-#ifdef __AVR_ATmega128__
-		/* no UART was selected, start application */
-		if(!bootuart) {
-			app_start();
-		}
-#else
-		/* check if bootloader pin is set low */
-		/* we don't start this part neither for the m8, nor m168 */
-		//if(bit_is_set(BL_PIN, BL)) {
-		//	app_start();
-		//}
-#endif
-	}
-
-#ifdef __AVR_ATmega128__
-	/* no bootuart was selected, default to uart 0 */
-	if(!bootuart) {
-		bootuart = 1;
-	}
-#endif
-
-
-	/* initialize UART(s) depending on CPU defined */
-#ifdef __AVR_ATmega128__
-	if(bootuart == 1) {
-		UBRR0L = (uint8_t)(F_CPU/(BAUD_RATE*16L)-1);
-		UBRR0H = (F_CPU/(BAUD_RATE*16L)-1) >> 8;
-		UCSR0A = 0x00;
-		UCSR0C = 0x06;
-		UCSR0B = _BV(TXEN0)|_BV(RXEN0);
-	}
-	if(bootuart == 2) {
-		UBRR1L = (uint8_t)(F_CPU/(BAUD_RATE*16L)-1);
-		UBRR1H = (F_CPU/(BAUD_RATE*16L)-1) >> 8;
-		UCSR1A = 0x00;
-		UCSR1C = 0x06;
-		UCSR1B = _BV(TXEN1)|_BV(RXEN1);
-	}
-#elif defined __AVR_ATmega163__
-	UBRR = (uint8_t)(F_CPU/(BAUD_RATE*16L)-1);
-	UBRRHI = (F_CPU/(BAUD_RATE*16L)-1) >> 8;
-	UCSRA = 0x00;
-	UCSRB = _BV(TXEN)|_BV(RXEN);	
-#elif defined(__AVR_ATmega168__) || defined(__AVR_ATmega328P__)
-	UBRR0L = (uint8_t)(F_CPU/(BAUD_RATE*16L)-1);
-	//UBRR0H = (F_CPU/(BAUD_RATE*16L)-1) >> 8;     // always 0 for 19200 baud or higher
-	UCSR0B = (1<<RXEN0) | (1<<TXEN0);
-	UCSR0C = (1<<UCSZ00) | (1<<UCSZ01);
-
-	/* Enable internal pull-up resistor on pin D0 (RX), in order
-	to supress line noise that prevents the bootloader from
-	timing out (DAM: 20070509) */
-	//DDRD &= ~_BV(PIND0);        // already 0 by default
-	PORTD |= _BV(PIND0);
-#elif defined __AVR_ATmega8__
-	/* m8 */
-	UBRRH = (((F_CPU/BAUD_RATE)/16)-1)>>8; 	// set baud rate
-	UBRRL = (((F_CPU/BAUD_RATE)/16)-1);
-	UCSRB = (1<<RXEN)|(1<<TXEN);  // enable Rx & Tx
-	UCSRC = (1<<URSEL)|(1<<UCSZ1)|(1<<UCSZ0);  // config USART; 8N1
-#else
-	/* m16,m32,m169,m8515,m8535 */
-	UBRRL = (uint8_t)(F_CPU/(BAUD_RATE*16L)-1);
-	UBRRH = (F_CPU/(BAUD_RATE*16L)-1) >> 8;
-	UCSRA = 0x00;
-	UCSRC = 0x06;
-	UCSRB = _BV(TXEN)|_BV(RXEN);
-#endif
-
 	/* set LED pin as output */
 	LED_DDR |= _BV(LED);
 
+	/* Ethernet stuff */
+	DDRB |= (1 << DDB2) | //SS
+		(1 << DDB3) | //MOSI
+		(1 << DDB5); //SCK
 
-	/* flash onboard LED to signal entering of bootloader */
-#ifdef __AVR_ATmega128__
-	// 4x for UART0, 5x for UART1
-	flash_led(NUM_LED_FLASHES + bootuart);
-#else
+	//Initial Pin States
+	PORTB |= (1 << PINB2); //SS High
+
+	/*  SPI Control Register */
+	SPCR = (0 << SPIE) | //SPI Interrupt Enable (active high)
+		(1 << SPE)  | //SPI Enable (active high)
+		(0 << DORD) | //Data Order (MSB first low; LSB first high)
+		(1 << MSTR) | //Master/Slave Select (Master high; Slave low)
+		(0 << CPOL) | //Clock Polarity
+		(0 << CPHA) | //Clock Phase
+		(0 << SPR1) | //SPI Clock Rate Select 1
+		(0 << SPR0); //SPI Clock Rate Select 0
+	
+	/* SPI Status Register */
+	SPSR = (0 << SPIF) | //SPI Interrupt Flag (active high)
+		(0 << WCOL) | //Write COLlision Flag (active high)
+		(0 << SPI2X); //Double SPI Speed Bit (active high)
+
+	
+	//Set Gateway Address: 169.254.183.177
+	spi_W5100(1, GAR2, 0xA9);
+	spi_W5100(1, GAR1, 0xFE);
+	spi_W5100(1, GAR2, 0xB7);
+	spi_W5100(1, GAR3, 0x00);
+
+	//Set Subnet Mask: 255.255.255.0
+	spi_W5100(1, SUBR0, 0xFF);
+	spi_W5100(1, SUBR1, 0xFF);
+	spi_W5100(1, SUBR2, 0xFF);
+	spi_W5100(1, SUBR3, 0x00);
+
+	//Set Device MAC: 00:08:DC:01:02:03
+	spi_W5100(1, SHAR0, 0x00);
+	spi_W5100(1, SHAR1, 0x08);
+	spi_W5100(1, SHAR2, 0xDC);
+	spi_W5100(1, SHAR3, 0x01);
+	spi_W5100(1, SHAR4, 0x02);
+	spi_W5100(1, SHAR5, 0x03);
+
+	//Set Device IP: 169.254.183.177
+	spi_W5100(1, SIPR0, 0xA9);
+	spi_W5100(1, SIPR1, 0xFE);
+	spi_W5100(1, SIPR2, 0XB7);
+	spi_W5100(1, SIPR3, 0xB1);
+	
+	//Assign 2K Memory per socket for RX and TX
+	spi_W5100(1, RMSR, 0x55);
+	spi_W5100(1, TMSR, 0x55);
+	
+	while(1) {
+		spi_W5100(1, S0_MR, 0x01); //Set TCP Mode on Socket 0
+
+		//Use port 23
+		spi_W5100(1, S0_PORT0, 0x00);
+		spi_W5100(1, S0_PORT1, 0x17);
+
+		//Set Socket Open
+		spi_W5100(1, S0_CR, Sn_CR_OPEN);
+
+		//Check if Socket has opened if not try again
+		if(spi_W5100(0, S0_SR, 0x00) != Sn_SR_SOCK_INIT) {
+			spi_W5100(1, S0_CR, Sn_CR_CLOSE);
+			continue;
+		}
+
+		//Set Socket to Listen
+		spi_W5100(1, S0_CR, Sn_CR_LISTEN);
+
+		//Check if Socket is listening if not try again
+		if(spi_W5100(0, S0_SR, 0x00) != Sn_SR_SOCK_LISTEN) {
+			spi_W5100(1, S0_CR, Sn_CR_CLOSE);
+			continue;
+		}
+		break;
+	}
+	
+	uint32_t count = 0;
+	
+	while(1) {
+		if(spi_W5100(0, S0_SR, 0x00) == Sn_SR_SOCK_ESTABLISHED) {
+			uint16_t rx_size = (spi_W5100(0, S0_RX_RSR0, 0x00) << 8) | spi_W5100(0, S0_RX_RSR1, 0x00);
+			uint16_t rx_pointer = (spi_W5100(0, S0_RX_RD0, 0x00) << 8) | spi_W5100(0, S0_RX_RD1, 0x00);
+			spi_W5100(1, S0_RX_RD0, ((rx_pointer+rx_size) & 0xFF00) >> 8);
+			spi_W5100(1, S0_RX_RD1, (rx_pointer+rx_size) & 0x00FF);
+			spi_W5100(1, S0_CR, Sn_CR_RECV);
+		
+			break;
+		}
+		count++;
+		if (count > MAX_TIME_COUNT) 
+			app_start();
+	}
+	
+
 	flash_led(NUM_LED_FLASHES * 2);
-#endif
 
 	/* 20050803: by DojoCorp, this is one of the parts provoking the
 	system to stop listening, cancelled from the original */
@@ -810,92 +813,55 @@ void puthex(char ch) {
 
 void putch(char ch)
 {
-#ifdef __AVR_ATmega128__
-	if(bootuart == 1) {
-		while (!(UCSR0A & _BV(UDRE0)));
-		UDR0 = ch;
-	}
-	else if (bootuart == 2) {
-		while (!(UCSR1A & _BV(UDRE1)));
-		UDR1 = ch;
-	}
-#elif defined(__AVR_ATmega168__)  || defined(__AVR_ATmega328P__)
-	while (!(UCSR0A & _BV(UDRE0)));
-	UDR0 = ch;
-#else
-	/* m8,16,32,169,8515,8535,163 */
-	while (!(UCSRA & _BV(UDRE)));
-	UDR = ch;
-#endif
+	sock_close();
+	uint16_t tx_write_pointer = spi_W5100(0, S0_TX_WR0, 0x00);
+	tx_write_pointer = ((tx_write_pointer & 0xFF) << 8) + spi_W5100(0, S0_TX_WR1, 0x00);	
+	uint16_t tx_offset = tx_write_pointer & Sn_TX_MASK;
+	uint16_t tx_address = S0_TX_BASE + tx_offset;
+
+	if((tx_offset+1) > Sn_TX_MASK) tx_address = S0_TX_BASE;
+	
+	spi_W5100(1, tx_address, ch);
+
+	spi_W5100(1, S0_TX_WR0, ((tx_write_pointer+1) & 0xFF00) >> 8);
+	spi_W5100(1, S0_TX_WR1, (tx_write_pointer+1) & 0xFF);
+	spi_W5100(1, S0_CR, Sn_CR_SEND);
 }
 
 
 char getch(void)
 {
-#ifdef __AVR_ATmega128__
-	if(bootuart == 1) {
-		while(!(UCSR0A & _BV(RXC0)));
-		return UDR0;
-	}
-	else if(bootuart == 2) {
-		while(!(UCSR1A & _BV(RXC1)));
-		return UDR1;
-	}
-	return 0;
-#elif defined(__AVR_ATmega168__)  || defined(__AVR_ATmega328P__)
+	uint16_t rx_size = 0x00;
+	
 	uint32_t count = 0;
-	
-	LED_PORT |= _BV(LED);
-	
-	while(!(UCSR0A & _BV(RXC0))){
-		/* 20060803 DojoCorp:: Addon coming from the previous Bootloader*/               
-		/* HACKME:: here is a good place to count times*/
-		count++;
-		if (count > MAX_TIME_COUNT) {
-			LED_PORT &= ~_BV(LED); // turn LED off in case of timeout
-			app_start();
-		}
-	}
-	
-	LED_PORT &= ~_BV(LED);
-	
-	return UDR0;
-#else
-	/* m8,16,32,169,8515,8535,163 */
-	uint32_t count = 0;
-	while(!(UCSRA & _BV(RXC))){
-		/* 20060803 DojoCorp:: Addon coming from the previous Bootloader*/               
-		/* HACKME:: here is a good place to count times*/
+	while(rx_size < 0x01) {
+		sock_close();
+		rx_size = (spi_W5100(0, S0_RX_RSR0, 0x00) << 8) | spi_W5100(0, S0_RX_RSR1, 0x00);		
 		count++;
 		if (count > MAX_TIME_COUNT)
 			app_start();
 	}
-	return UDR;
-#endif
-}
+	
+	uint8_t ch = 0;
 
+	uint16_t rx_pointer = (spi_W5100(0, S0_RX_RD0, 0x00) << 8) | spi_W5100(0, S0_RX_RD1, 0x00);
+	uint16_t rx_offset = rx_pointer & Sn_RX_MASK; //Calculate offset
+	uint16_t rx_address = S0_RX_BASE+rx_offset; //Calculate physical start address
+	
+	if((rx_offset+1) > Sn_RX_MASK) rx_address = S0_RX_BASE;
+	
+	ch = spi_W5100(0, rx_address, 0x00);
+
+	spi_W5100(1, S0_RX_RD0, ((rx_pointer+1) & 0xFF00) >> 8);
+	spi_W5100(1, S0_RX_RD1, (rx_pointer+1) & 0x00FF);
+	spi_W5100(1, S0_CR, Sn_CR_RECV);
+	return ch;
+}
 
 void getNch(uint8_t count)
 {
 	while(count--) {
-#ifdef __AVR_ATmega128__
-		if(bootuart == 1) {
-			while(!(UCSR0A & _BV(RXC0)));
-			UDR0;
-		} 
-		else if(bootuart == 2) {
-			while(!(UCSR1A & _BV(RXC1)));
-			UDR1;
-		}
-#elif defined(__AVR_ATmega168__)  || defined(__AVR_ATmega328P__)
 		getch();
-#else
-		/* m8,16,32,169,8515,8535,163 */
-		/* 20060803 DojoCorp:: Addon coming from the previous Bootloader*/               
-		//while(!(UCSRA & _BV(RXC)));
-		//UDR;
-		getch(); // need to handle time out
-#endif		
 	}
 }
 
@@ -928,5 +894,41 @@ void flash_led(uint8_t count)
 	}
 }
 
+
+uint8_t spi_W5100(uint8_t opcode, uint16_t address, uint8_t data) {
+	PORTB = PORTB & ~(1 << PINB2); //Make SS Low
+
+	if(opcode) spi(0xF0); //write
+	else spi(0x0F); //read
+	
+	spi((address&0xFF00) >> 8); //Address 1
+	spi(address&0xFF); //Address 2
+	
+	uint8_t response = spi(data); //Send data
+	
+	PORTB |= (1 << PINB2); //Make SS High
+	
+	return response;
+}
+
+uint8_t spi(uint8_t data) {
+	/* Start transmission */
+	SPDR = data;
+	/* Wait for transmission complete */
+	while(!(SPSR & (1 << SPIF)));
+	/* Return received data */
+	return SPDR;
+}
+
+void sock_close() {
+	if(spi_W5100(0, S0_SR, 0x00) == Sn_SR_SOCK_CLOSE_WAIT) {
+		spi_W5100(1, S0_CR, Sn_CR_CLOSE);
+		app_start();
+	}
+	if(spi_W5100(0, S0_SR, 0x00) == Sn_SR_SOCK_CLOSED) {
+		spi_W5100(1, S0_CR, Sn_CR_CLOSE);
+		app_start();
+	}
+}
 
 /* end of file ATmegaBOOT.c */
