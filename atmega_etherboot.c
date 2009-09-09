@@ -129,7 +129,7 @@
 #define LED_PIN  PINB
 /* 20060803: hacked by DojoCorp, LED pin is B5 in Arduino */
 /* #define LED      PINB2 */
-#define LED      PINB5
+#define LED      PINB0
 #endif
 
 
