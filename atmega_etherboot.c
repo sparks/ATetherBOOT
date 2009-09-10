@@ -328,6 +328,8 @@ int main(void)
 
 	/* set LED pin as output */
 	LED_DDR |= _BV(LED);
+	LED_PORT |= _BV(LED);
+	
 
 	/* Ethernet stuff */
 	DDRB |= (1 << DDB2) | //SS

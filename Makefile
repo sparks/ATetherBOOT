@@ -153,9 +153,9 @@ ng_isp: isp
 
 atmega328: TARGET = atmega328
 atmega328: MCU_TARGET = atmega328p
-atmega328: CFLAGS += '-DMAX_TIME_COUNT=F_CPU>>4' '-DNUM_LED_FLASHES=1'
+atmega328: CFLAGS += '-DMAX_TIME_COUNT=F_CPU>>5' '-DNUM_LED_FLASHES=1'
 atmega328: AVR_FREQ = 20000000L 
-atmega328: LDSECTION  = --section-start=.text=0x7C00
+atmega328: LDSECTION  = --section-start=.text=0x7800
 atmega328: $(PROGRAM)_atmega328.hex
 	@echo -----------
 	@avr-size $(PROGRAM)_atmega328.hex
@@ -164,14 +164,16 @@ atmega328: $(PROGRAM)_atmega328.hex
 atmega328_isp: atmega328
 atmega328_isp: TARGET = atmega328
 atmega328_isp: MCU_TARGET = atmega328p
-atmega328_isp: HFUSE = DC
+atmega328_isp: HFUSE = D8
 atmega328_isp: LFUSE = FF
-atmega328_isp: EFUSE = 05
-atmega328_isp: isp
+atmega328_isp: EFUSE = 07
+atmega328_isp: isp-flash
 
-isp: $(TARGET)
-	$(ISPFUSES)
+isp-flash: $(TARGET)
 	$(ISPFLASH)
+
+isp-fuse: $(TARGET)
+	$(ISPFUSES)
 
 isp-stk500: $(PROGRAM)_$(TARGET).hex
 	$(STK500-1)
