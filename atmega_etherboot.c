@@ -114,22 +114,22 @@
 #define SW_MINOR 0x10
 
 
-/* onboard LED is used to indicate, that the bootloader was entered (3x flashing) */
+/* onboard ` is used to indicate, that the bootloader was entered (3x flashing) */
 /* if monitor functions are included, LED goes on after monitor was entered */
 #ifdef __AVR_ATmega128__
 /* Onboard LED is connected to pin PB7 (e.g. Crumb128, PROBOmega128, Savvy128) */
-#define LED_DDR  DDRB
-#define LED_PORT PORTB
-#define LED_PIN  PINB
-#define LED      PINB7
+#define LED_DDR  DDRC
+#define LED_PORT PORTC
+#define LED_PIN  PINC
+#define LED      PINC0
 #else
 /* Onboard LED is connected to pin PB2 (e.g. Crumb8, Crumb168) */
-#define LED_DDR  DDRB
-#define LED_PORT PORTB
-#define LED_PIN  PINB
+#define LED_DDR  DDRC
+#define LED_PORT PORTC
+#define LED_PIN  PINC
 /* 20060803: hacked by DojoCorp, LED pin is B5 in Arduino */
 /* #define LED      PINB2 */
-#define LED      PINB0
+#define LED      PINC0
 #endif
 
 
@@ -384,6 +384,8 @@ int main(void)
 	//Assign 2K Memory per socket for RX and TX
 	spi_W5100(1, RMSR, 0x55);
 	spi_W5100(1, TMSR, 0x55);
+	
+	flash_led(NUM_LED_FLASHES * 2);
 	
 	while(1) {
 		spi_W5100(1, S0_MR, 0x01); //Set TCP Mode on Socket 0
