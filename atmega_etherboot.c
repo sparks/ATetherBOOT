@@ -427,12 +427,11 @@ int main(void)
 			break;
 		}
 		count++;
-		if (count > MAX_TIME_COUNT) 
+		if (count > MAX_TIME_COUNT >> 1) {
+			flash_led(NUM_LED_FLASHES * 2);
 			app_start();
-	}
-	
-
-	flash_led(NUM_LED_FLASHES * 2);
+		}
+	}	
 
 	/* 20050803: by DojoCorp, this is one of the parts provoking the
 	system to stop listening, cancelled from the original */
