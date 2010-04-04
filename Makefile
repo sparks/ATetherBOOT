@@ -72,7 +72,7 @@ override LDFLAGS       = -Wl,$(LDSECTION) -Wl,--relax -nostartfiles -Wl,-gc-sect
 OBJCOPY        = avr-objcopy
 OBJDUMP        = avr-objdump
 
-all: CFLAGS += '-DMAX_TIME_COUNT=F_CPU>>4' '-DNUM_LED_FLASHES=3'
+all: CFLAGS += '-DMAX_TIME_COUNT=F_CPU>>5' '-DNUM_LED_FLASHES=3'
 all: $(PROGRAM).hex
 	@echo -----------
 	@avr-size $(PROGRAM).hex

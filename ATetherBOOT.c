@@ -54,15 +54,25 @@
 /*                                                        */
 /**********************************************************/
 
-/* some includes */
+/* Includes */
 #include <inttypes.h>
 #include <avr/io.h>
 #include <avr/pgmspace.h>
 #include <avr/interrupt.h>
 #include <avr/wdt.h>
-#include <util/delay.h>
 #include <avr/boot.h>
+#include <util/delay.h>
 #include "W5100.h"
+
+/* the current avr-libc eeprom functions do not support the ATmega168 */
+/* own eeprom write/read functions are used instead */
+#if !defined(__AVR_ATmega168__) && !defined(__AVR_ATmega328P__)
+#include <avr/eeprom.h>
+#endif
+
+/* Defines */
+
+/* 20100404: Severin Smith */
 
 #define Sn_RX_MASK (0x0800-1)
 
@@ -78,12 +88,6 @@
 #define S2_TX_BASE (TX_BASE+(Sn_TX_MASK+1)*2)
 #define S3_TX_BASE (TX_BASE+(Sn_TX_MASK+1)*3)
 
-/* the current avr-libc eeprom functions do not support the ATmega168 */
-/* own eeprom write/read functions are used instead */
-#if !defined(__AVR_ATmega168__) && !defined(__AVR_ATmega328P__)
-#include <avr/eeprom.h>
-#endif
-
 /* Use the F_CPU defined in Makefile */
 
 /* 20060803: hacked by DojoCorp */
@@ -95,14 +99,11 @@
 /* 20070707: hacked by David A. Mellis - after this many errors give up and launch application */
 #define MAX_ERROR_COUNT 5
 
-
-
 /* SW_MAJOR and MINOR needs to be updated from time to time to avoid warning message from AVR Studio */
 /* never allow AVR Studio to do an update !!!! */
 #define HW_VER	 0x02
 #define SW_MAJOR 0x01
 #define SW_MINOR 0x10
-
 
 /* onboard ` is used to indicate, that the bootloader was entered (3x flashing) */
 /* if monitor functions are included, LED goes on after monitor was entered */
@@ -117,6 +118,7 @@
 #define LED_DDR  DDRC
 #define LED_PORT PORTC
 #define LED_PIN  PINC
+/* 20100404: hacked by Severin Smith, LED pin is C0 on Anatidae */
 /* 20060803: hacked by DojoCorp, LED pin is B5 in Arduino */
 /* #define LED      PINB2 */
 #define LED      PINC0
@@ -224,6 +226,7 @@ int main (void) __attribute__ ((naked,section (".init9")));
 uint8_t spi(uint8_t data); //Basic 8-Bit SPI exchange
 uint8_t spi_W5100(uint8_t opcode, uint16_t address, uint8_t data); //Send a full 32-Bit Command to the W5100 chip
 void sock_close();
+void clean_app_start();
 
 /* some variables */
 union address_union {
@@ -314,13 +317,13 @@ int main(void)
 	BL_PORT |= _BV(BL);
 	*/
 #endif
-
-
+	
 	/* set LED pin as output */
 	LED_DDR |= _BV(LED);
 	LED_PORT |= _BV(LED);
 	
 
+	/* 20100404: Severin Smith, ethernet setup */
 	/* Ethernet stuff */
 	DDRB |= (1 << DDB2) | //SS
 		(1 << DDB3) | //MOSI
@@ -374,9 +377,8 @@ int main(void)
 	//Assign 2K Memory per socket for RX and TX
 	spi_W5100(1, RMSR, 0x55);
 	spi_W5100(1, TMSR, 0x55);
-	
-	flash_led(NUM_LED_FLASHES * 2);
-	
+		
+	//Set up sockets for TCP connections, if SPI connection is faulty increment error count/bail out
 	while(1) {
 		spi_W5100(1, S0_MR, 0x01); //Set TCP Mode on Socket 0
 
@@ -390,6 +392,7 @@ int main(void)
 		//Check if Socket has opened if not try again
 		if(spi_W5100(0, S0_SR, 0x00) != Sn_SR_SOCK_INIT) {
 			spi_W5100(1, S0_CR, Sn_CR_CLOSE);
+			if (++error_count == MAX_ERROR_COUNT) clean_app_start();
 			continue;
 		}
 
@@ -399,34 +402,37 @@ int main(void)
 		//Check if Socket is listening if not try again
 		if(spi_W5100(0, S0_SR, 0x00) != Sn_SR_SOCK_LISTEN) {
 			spi_W5100(1, S0_CR, Sn_CR_CLOSE);
+			if (++error_count == MAX_ERROR_COUNT) clean_app_start();
 			continue;
 		}
 		break;
 	}
 	
+	flash_led(NUM_LED_FLASHES * 2); //Flash to indicate setup complete, ready to recieve connection
+	
 	uint32_t count = 0;
 	
+	//Wait for connection
 	while(1) {
 		if(spi_W5100(0, S0_SR, 0x00) == Sn_SR_SOCK_ESTABLISHED) {
+			//Clear Rx pointer or else we get bogus data
 			uint16_t rx_size = (spi_W5100(0, S0_RX_RSR0, 0x00) << 8) | spi_W5100(0, S0_RX_RSR1, 0x00);
 			uint16_t rx_pointer = (spi_W5100(0, S0_RX_RD0, 0x00) << 8) | spi_W5100(0, S0_RX_RD1, 0x00);
 			spi_W5100(1, S0_RX_RD0, ((rx_pointer+rx_size) & 0xFF00) >> 8);
 			spi_W5100(1, S0_RX_RD1, (rx_pointer+rx_size) & 0x00FF);
+			
+			//Ready to receive
 			spi_W5100(1, S0_CR, Sn_CR_RECV);
 		
 			break;
 		}
 		count++;
-		if (count > MAX_TIME_COUNT >> 1) {
-			flash_led(NUM_LED_FLASHES * 2);
-			app_start();
-		}
+		if (count > MAX_TIME_COUNT) clean_app_start();
 	}	
 
 	/* 20050803: by DojoCorp, this is one of the parts provoking the
 	system to stop listening, cancelled from the original */
 	//putch('\0');
-
 
 	/* forever loop */
 	for (;;) {
@@ -441,7 +447,7 @@ int main(void)
 		firstchar = 1;       // we got an appropriate bootloader instr.
 		nothing_response();
 	} else if (firstchar == 0) {
-		app_start();
+		clean_app_start();
 	}
 
 
@@ -461,7 +467,7 @@ int main(void)
 			putch(0x10);
 		} else {
 			if (++error_count == MAX_ERROR_COUNT)
-				app_start();
+				clean_app_start();
 		}
 	}
 
@@ -512,7 +518,7 @@ int main(void)
 #ifdef QUICKSTART_MODS
 		flash_led(2);
 		// start immediately -ada
-		app_start();
+		clean_app_start();
 #endif
 	}
 
@@ -584,7 +590,7 @@ int main(void)
 			putch(0x10);
 		} else {
 			if (++error_count == MAX_ERROR_COUNT)
-				app_start();
+				clean_app_start();
 		}		
 	}
 
@@ -636,7 +642,7 @@ int main(void)
 			putch(0x10);
 		} else {
 			if (++error_count == MAX_ERROR_COUNT)
-			app_start();
+			clean_app_start();
 		}
 	}
 
@@ -747,7 +753,7 @@ int main(void)
 #endif
 
 				else if(ch == 'j') {
-					app_start();
+					clean_app_start();
 				}
 
 			} /* end of monitor functions */
@@ -758,7 +764,7 @@ int main(void)
 	/* end of monitor */
 #endif
 	else if (++error_count == MAX_ERROR_COUNT) {
-		app_start();
+		clean_app_start();
 	}
 	} /* end of forever loop */
 
@@ -803,10 +809,12 @@ void puthex(char ch) {
 	putch(ch);
 }
 
-
+/* 20100404 Severin Smith, hacked to work with WIZNET W5100 instead of UART */
 void putch(char ch)
 {
-	sock_close();
+	sock_close(); //Check if connection was dropped
+
+	//Compute TX address
 	uint16_t tx_write_pointer = spi_W5100(0, S0_TX_WR0, 0x00);
 	tx_write_pointer = ((tx_write_pointer & 0xFF) << 8) + spi_W5100(0, S0_TX_WR1, 0x00);	
 	uint16_t tx_offset = tx_write_pointer & Sn_TX_MASK;
@@ -814,40 +822,48 @@ void putch(char ch)
 
 	if((tx_offset+1) > Sn_TX_MASK) tx_address = S0_TX_BASE;
 	
+	//Load char in W5100 memory
 	spi_W5100(1, tx_address, ch);
 
+	//Update Pointers
 	spi_W5100(1, S0_TX_WR0, ((tx_write_pointer+1) & 0xFF00) >> 8);
 	spi_W5100(1, S0_TX_WR1, (tx_write_pointer+1) & 0xFF);
+	//Send
 	spi_W5100(1, S0_CR, Sn_CR_SEND);
 }
 
 
+/* 20100404 Severin Smith, hacked to work with WIZNET W5100 instead of UART */
 char getch(void)
 {
+	//Wait for the next char within reason, else cleanup/bailout
 	uint16_t rx_size = 0x00;
 	
 	uint32_t count = 0;
 	while(rx_size < 0x01) {
-		sock_close();
+		sock_close(); //Check for dropped connection
 		rx_size = (spi_W5100(0, S0_RX_RSR0, 0x00) << 8) | spi_W5100(0, S0_RX_RSR1, 0x00);		
 		count++;
-		if (count > MAX_TIME_COUNT)
-			app_start();
+		if (count > MAX_TIME_COUNT) clean_app_start();
 	}
 	
 	uint8_t ch = 0;
-
+	
+	//Compute RX address
 	uint16_t rx_pointer = (spi_W5100(0, S0_RX_RD0, 0x00) << 8) | spi_W5100(0, S0_RX_RD1, 0x00);
 	uint16_t rx_offset = rx_pointer & Sn_RX_MASK; //Calculate offset
 	uint16_t rx_address = S0_RX_BASE+rx_offset; //Calculate physical start address
 	
 	if((rx_offset+1) > Sn_RX_MASK) rx_address = S0_RX_BASE;
 	
+	//Get char
 	ch = spi_W5100(0, rx_address, 0x00);
 
+	//Update RX pointers
 	spi_W5100(1, S0_RX_RD0, ((rx_pointer+1) & 0xFF00) >> 8);
 	spi_W5100(1, S0_RX_RD1, (rx_pointer+1) & 0x00FF);
 	spi_W5100(1, S0_CR, Sn_CR_RECV);
+	
 	return ch;
 }
 
@@ -868,7 +884,7 @@ void byte_response(uint8_t val)
 		putch(0x10);
 	} else {
 		if (++error_count == MAX_ERROR_COUNT)
-			app_start();
+			clean_app_start();
 	}
 }
 
@@ -888,6 +904,7 @@ void flash_led(uint8_t count)
 }
 
 
+/* 20100404 Severin Smith, hacked to work with WIZNET W5100 instead of UART */
 uint8_t spi_W5100(uint8_t opcode, uint16_t address, uint8_t data) {
 	PORTB = PORTB & ~(1 << PINB2); //Make SS Low
 
@@ -914,14 +931,18 @@ uint8_t spi(uint8_t data) {
 }
 
 void sock_close() {
+	//Check if we were dropped and clean up/bail out if needed
 	if(spi_W5100(0, S0_SR, 0x00) == Sn_SR_SOCK_CLOSE_WAIT) {
-		spi_W5100(1, S0_CR, Sn_CR_CLOSE);
-		app_start();
+		clean_app_start();
 	}
 	if(spi_W5100(0, S0_SR, 0x00) == Sn_SR_SOCK_CLOSED) {
-		spi_W5100(1, S0_CR, Sn_CR_CLOSE);
-		app_start();
+		clean_app_start();
 	}
 }
 
-/* end of file ATmegaBOOT.c */
+void clean_app_start() {
+	spi_W5100(1, S0_CR, Sn_CR_CLOSE);
+	app_start();
+}
+
+/* end of file ATetherBOOT.c */
