@@ -1,31 +1,38 @@
-# Makefile for ATmegaBOOT
-# E.Lins, 18.7.2005
-# $Id$
-#
+# ATetherBOOT Severin Smith, 4.4.2010
+# Adapted from Arduino Makefile (ATmegaBOOT) by E.Lins, 18.7.2005
+
+# Designed for atmega328p in conjuction with WIZNET W5100.
+
 # Instructions
 #
 # To make bootloader .hex file:
-# make diecimila
-# make lilypad
-# make ng
-# etc...
+# make
 #
 # To burn bootloader .hex file:
-# make diecimila_isp
-# make lilypad_isp
-# make ng_isp
-# etc...
+# make flash
+#
+# To burn fuses:
+# make fuse
 
 # program name should not be changed...
-PROGRAM    = atmega_etherboot
+PROGRAM    = ATetherBOOT
 
 # enter the parameters for the avrdude isp tool
 ISPTOOL	   = usbasp
 ISPPORT	   = usb
-ISPSPEED   = 
+ISPSPEED   =
+BITCLOCK   = 5
 
-MCU_TARGET = atmega168
-LDSECTION  = --section-start=.text=0x3C00
+# chip config
+MCU_TARGET = atmega328p
+
+AVR_FREQ = 20000000L
+
+HFUSE = D8
+LFUSE = FF
+EFUSE = 07
+
+LDSECTION  = --section-start=.text=0x7800
 
 # the efuse should really be 0xf8; since, however, only the lower
 # three bits of that byte are used on the atmega168, avrdude gets
@@ -37,13 +44,13 @@ LDSECTION  = --section-start=.text=0x3C00
 # lock it), but since the high two bits of the lock byte are
 # unused, avrdude would get confused.
 
-ISPFUSES    = avrdude -c $(ISPTOOL) -p $(MCU_TARGET) -P $(ISPPORT) $(ISPSPEED) \
--e -B 5 -u -U lock:w:0x3f:m -U efuse:w:0x$(EFUSE):m -U hfuse:w:0x$(HFUSE):m -U lfuse:w:0x$(LFUSE):m
-ISPFLASH    = avrdude -c $(ISPTOOL) -p $(MCU_TARGET) -B 5 -P $(ISPPORT) $(ISPSPEED) \
--U flash:w:$(PROGRAM)_$(TARGET).hex -U lock:w:0x0f:m
+ISPFUSES    = avrdude -c $(ISPTOOL) -p $(MCU_TARGET) -P $(ISPPORT) $(ISPSPEED) -B $(BITCLOCK) \
+-e -u -U lock:w:0x3f:m -U efuse:w:0x$(EFUSE):m -U hfuse:w:0x$(HFUSE):m -U lfuse:w:0x$(LFUSE):m
+ISPFLASH    = avrdude -c $(ISPTOOL) -p $(MCU_TARGET) -P $(ISPPORT) $(ISPSPEED) -B $(BITCLOCK) \
+-U flash:w:$(PROGRAM).hex -U lock:w:0x0f:m
 
 STK500 = "C:\Program Files\Atmel\AVR Tools\STK500\Stk500.exe"
-STK500-1 = $(STK500) -e -d$(MCU_TARGET) -pf -vf -if$(PROGRAM)_$(TARGET).hex \
+STK500-1 = $(STK500) -e -d$(MCU_TARGET) -pf -vf -if$(PROGRAM).hex \
 -lFF -LFF -f$(HFUSE)$(LFUSE) -EF8 -ms -q -cUSB -I200kHz -s -wt
 STK500-2 = $(STK500) -d$(MCU_TARGET) -ms -q -lCF -LCF -cUSB -I200kHz -s -wt
 
@@ -65,118 +72,19 @@ override LDFLAGS       = -Wl,$(LDSECTION) -Wl,--relax -nostartfiles -Wl,-gc-sect
 OBJCOPY        = avr-objcopy
 OBJDUMP        = avr-objdump
 
-all:
-
-lilypad: TARGET = lilypad
-lilypad: CFLAGS += '-DMAX_TIME_COUNT=F_CPU>>1' '-DNUM_LED_FLASHES=3'
-lilypad: AVR_FREQ = 8000000L
-lilypad: $(PROGRAM)_lilypad.hex
-
-lilypad_isp: lilypad
-lilypad_isp: TARGET = lilypad
-lilypad_isp: HFUSE = DD
-lilypad_isp: LFUSE = E2
-lilypad_isp: EFUSE = 02
-lilypad_isp: isp
-
-lilypad_resonator: TARGET = lilypad_resonator
-lilypad_resonator: CFLAGS += '-DMAX_TIME_COUNT=F_CPU>>4' '-DNUM_LED_FLASHES=3'
-lilypad_resonator: AVR_FREQ = 8000000L
-lilypad_resonator: $(PROGRAM)_lilypad_resonator.hex
-
-lilypad_resonator_isp: lilypad_resonator
-lilypad_resonator_isp: TARGET = lilypad_resonator
-lilypad_resonator_isp: HFUSE = DD
-lilypad_resonator_isp: LFUSE = C6
-lilypad_resonator_isp: EFUSE = 02
-lilypad_resonator_isp: isp
-
-pro8: TARGET = pro_8MHz
-pro8: CFLAGS += '-DMAX_TIME_COUNT=F_CPU>>4' '-DNUM_LED_FLASHES=1' '-DWATCHDOG_MODS'
-pro8: AVR_FREQ = 8000000L
-pro8: $(PROGRAM)_pro_8MHz.hex
-
-pro8_isp: pro8
-pro8_isp: TARGET = pro_8MHz
-pro8_isp: HFUSE = DD
-pro8_isp: LFUSE = C6
-pro8_isp: EFUSE = 02
-pro8_isp: isp
-
-pro16: TARGET = pro_16MHz
-pro16: CFLAGS += '-DMAX_TIME_COUNT=F_CPU>>4' '-DNUM_LED_FLASHES=1' '-DWATCHDOG_MODS'
-pro16: AVR_FREQ = 16000000L
-pro16: $(PROGRAM)_pro_16MHz.hex
-
-pro16_isp: pro16
-pro16_isp: TARGET = pro_16MHz
-pro16_isp: HFUSE = DD
-pro16_isp: LFUSE = C6
-pro16_isp: EFUSE = 02
-pro16_isp: isp
-
-pro20: TARGET = pro_20mhz
-pro20: CFLAGS += '-DMAX_TIME_COUNT=F_CPU>>4' '-DNUM_LED_FLASHES=1' '-DWATCHDOG_MODS'
-pro20: AVR_FREQ = 20000000L
-pro20: $(PROGRAM)_pro_20mhz.hex
-
-pro20_isp: pro20
-pro20_isp: TARGET = pro_20mhz
-pro20_isp: HFUSE = DD
-pro20_isp: LFUSE = C6
-pro20_isp: EFUSE = 02
-pro20_isp: isp
-
-diecimila: TARGET = diecimila
-diecimila: CFLAGS += '-DMAX_TIME_COUNT=F_CPU>>4' '-DNUM_LED_FLASHES=1'
-diecimila: AVR_FREQ = 16000000L 
-diecimila: $(PROGRAM)_diecimila.hex
-
-diecimila_isp: diecimila
-diecimila_isp: TARGET = diecimila
-diecimila_isp: HFUSE = DD
-diecimila_isp: LFUSE = FF
-diecimila_isp: EFUSE = 02
-diecimila_isp: isp
-
-ng: TARGET = ng
-ng: CFLAGS += '-DMAX_TIME_COUNT=F_CPU>>1' '-DNUM_LED_FLASHES=3'
-ng: AVR_FREQ = 16000000L
-ng: $(PROGRAM)_ng.hex
-
-ng_isp: ng
-ng_isp: TARGET = ng
-ng_isp: HFUSE = DD
-ng_isp: LFUSE = FF
-ng_isp: EFUSE = 02
-ng_isp: isp
-
-atmega328: TARGET = atmega328
-atmega328: MCU_TARGET = atmega328p
-atmega328: CFLAGS += '-DMAX_TIME_COUNT=F_CPU>>4' '-DNUM_LED_FLASHES=3'
-atmega328: AVR_FREQ = 20000000L 
-atmega328: LDSECTION  = --section-start=.text=0x7800
-atmega328: $(PROGRAM)_atmega328.hex
+all: CFLAGS += '-DMAX_TIME_COUNT=F_CPU>>4' '-DNUM_LED_FLASHES=3'
+all: $(PROGRAM).hex
 	@echo -----------
-	@avr-size $(PROGRAM)_atmega328.hex
+	@avr-size $(PROGRAM).hex
 	@echo -----------
 
-atmega328_isp: atmega328
-atmega328_isp: TARGET = atmega328
-atmega328_isp: MCU_TARGET = atmega328p
-atmega328_isp: HFUSE = D8
-atmega328_isp: LFUSE = FF
-atmega328_isp: EFUSE = 07
-atmega328_isp: isp-fuse
-atmega328_isp: isp-flash
-
-isp-flash: $(TARGET)
+flash: all
 	$(ISPFLASH)
 
-isp-fuse: $(TARGET)
+fuse: all
 	$(ISPFUSES)
 
-isp-stk500: $(PROGRAM)_$(TARGET).hex
+flash-stk500: all
 	$(STK500-1)
 	$(STK500-2)
 
@@ -197,4 +105,3 @@ clean:
 
 %.bin: %.elf
 	$(OBJCOPY) -j .text -j .data -O binary $< $@
-	

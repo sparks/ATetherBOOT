@@ -1,10 +1,16 @@
 /**********************************************************/
-/* Serial Bootloader for Atmel megaAVR Controllers        */
+/*               Ethernet Bootloader                      */
+/*     for atmega328p in conjuction with WIZNET W5100     */
 /*                                                        */
-/* tested with ATmega8, ATmega128 and ATmega168           */
-/* should work with other mega's, see code for details    */
+/*    Based on Ardunio bootloader (ATmegaBOOT.c)          */
+/*   Serial Bootloader for Atmel megaAVR Controllers      */
 /*                                                        */
-/* ATmegaBOOT.c                                           */
+/*                    ATetherBOOT.c                       */
+/*                                                        */
+/* 20100404: Hacked to work with W5100 by Severin Smith   */
+/*           http://www.smallbutdigital.com               */
+/*                                                        */
+/* ------------------------------------------------------ */
 /*                                                        */
 /* 20090201: hacked for 1k bootloader for ATmega168/328   */
 /*           swapped bulk of assembler for examples at:   */
@@ -19,25 +25,21 @@
 /*           and D. Cuartielles                           */
 /*                                                        */
 /* Monitor and debug functions were added to the original */
-/* code by Dr. Erik Lins, chip45.com. (See below)         */
+/* code by Dr. Erik Lins, chip45.com.                     */
 /*                                                        */
 /* Thanks to Karl Pitrich for fixing a bootloader pin     */
 /* problem and more informative LED blinking!             */
-/*                                                        */
-/* For the latest version see:                            */
-/* http://www.chip45.com/                                 */
 /*                                                        */
 /* ------------------------------------------------------ */
 /*                                                        */
 /* based on stk500boot.c                                  */
 /* Copyright (c) 2003, Jason P. Kyle                      */
 /* All rights reserved.                                   */
-/* see avr1.org for original file and information         */
 /*                                                        */
 /* This program is free software; you can redistribute it */
 /* and/or modify it under the terms of the GNU General    */
 /* Public License as published by the Free Software       */
-/* Foundation; either version 2 of the License, or        */
+/* Foundation; either version 3 of the License, or        */
 /* (at your option) any later version.                    */
 /*                                                        */
 /* This program is distributed in the hope that it will   */
@@ -47,22 +49,10 @@
 /* License for more details.                              */
 /*                                                        */
 /* You should have received a copy of the GNU General     */
-/* Public License along with this program; if not, write  */
-/* to the Free Software Foundation, Inc.,                 */
-/* 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA */
+/* Public License along with this program; if not,        */
+/* see <http://www.gnu.org/licenses/>.                    */
 /*                                                        */
-/* Licence can be viewed at                               */
-/* http://www.fsf.org/licenses/gpl.txt                    */
-/*                                                        */
-/* Target = Atmel AVR m128,m64,m32,m16,m8,m162,m163,m169, */
-/* m8515,m8535. ATmega161 has a very small boot block so  */
-/* isn't supported.                                       */
-/*                                                        */
-/* Tested with m168                                       */
 /**********************************************************/
-
-/* $Id$ */
-
 
 /* some includes */
 #include <inttypes.h>
